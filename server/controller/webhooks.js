@@ -1,6 +1,7 @@
 import { Webhook } from "svix";
 import User from "../models/User.js";
 import mongoose from "mongoose";
+import connectDB from "../configs/mongodb.js";
 
 //API Controller Function to Manage Clerk User with db
 
@@ -82,13 +83,16 @@ export const clerkWebhooks = async (req, res) => {
       mongoose.connection.readyState
     );
     if (mongoose.connection.readyState !== 1) {
-      console.error(
-        "❌ Database not connected! State:",
-        mongoose.connection.readyState
-      );
-      return res
-        .status(500)
-        .json({ success: false, message: "Database not connected" });
+      console.log("⚡ Database not connected, attempting to connect...");
+      try {
+        await connectDB();
+        console.log("✅ Database connected successfully");
+      } catch (dbError) {
+        console.error("❌ Failed to connect to database:", dbError.message);
+        return res
+          .status(500)
+          .json({ success: false, message: "Database connection failed" });
+      }
     }
 
     switch (type) {
