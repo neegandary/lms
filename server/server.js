@@ -15,7 +15,8 @@ app.use(cors());
 
 //Routes
 app.get("/", (req, res) => res.send("API Working"));
-app.post("/clerk", express.json(), clerkWebhooks);
+// Use raw body for Clerk webhook so signature verification works
+app.post("/clerk", express.raw({ type: "application/json" }), clerkWebhooks);
 
 //Port
 const PORT = process.env.PORT || 5000;

@@ -5,50 +5,93 @@ import User from "../models/User.js";
 
 export const clerkWebhooks = async (req, res) => {
   try {
-    const whook = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
-
-    await whook.verify(JSON.stringify(req, body), {
+    const svixHeaders = {
       "svix-id": req.headers["svix-id"],
       "svix-timestamp": req.headers["svix-timestamp"],
       "svix-signature": req.headers["svix-signature"],
-    });
+    };
 
-    const { data, type } = req.body;
+    if (
+      !svixHeaders["svix-id"] ||
+      !svixHeaders["svix-timestamp"] ||
+      !svixHeaders["svix-signature"]
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing Svix headers" });
+    }
+
+    const webhook = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
+    const payloadString = req.body?.toString?.() ?? "";
+    const evt = webhook.verify(payloadString, svixHeaders);
+
+    const { data, type } = evt;
 
     switch (type) {
       case "user.created": {
+        const primaryEmail = (
+          data.email_addresses?.find?.(
+            (e) => e.id === data.primary_email_address_id
+          ) || data.email_addresses?.[0]
+        )?.email_address;
+        const firstName = data.first_name || "";
+        const lastName = data.last_name || "";
+        const fullName =
+          `${firstName} ${lastName}`.trim() ||
+          data.username ||
+          primaryEmail ||
+          "Unknown";
+
         const userData = {
           _id: data.id,
-          email: data.email_address[0].email_address,
-          name: data.first_name + " " + data.last_name,
-          imageUrl: data.image_url,
+          email: primaryEmail || "",
+          name: fullName,
+          imageUrl: data.image_url || "",
         };
-        await User.create(userData);
-        res.json({});
-        break;
+        await User.findByIdAndUpdate(data.id, userData, {
+          upsert: true,
+          new: true,
+        });
+        return res.status(200).json({ success: true });
       }
 
       case "user.updated": {
+        const primaryEmail = (
+          data.email_addresses?.find?.(
+            (e) => e.id === data.primary_email_address_id
+          ) || data.email_addresses?.[0]
+        )?.email_address;
+        const firstName = data.first_name || "";
+        const lastName = data.last_name || "";
+        const fullName =
+          `${firstName} ${lastName}`.trim() ||
+          data.username ||
+          primaryEmail ||
+          "Unknown";
         const userData = {
-          email: data.email_address[0].email_address,
-          name: data.first_name + " " + data.last_name,
-          imageUrl: data.image_url,
+          email: primaryEmail || "",
+          name: fullName,
+          imageUrl: data.image_url || "",
         };
-        await User.findByIdAndUpdate(data.id, userData);
-        res.json({});
-        break;
+        await User.findByIdAndUpdate(data.id, userData, { new: true });
+        return res.status(200).json({ success: true });
       }
 
       case "user.deleted": {
         await User.findByIdAndDelete(data.id);
-        res.json({});
-        break;
+        return res.status(200).json({ success: true });
       }
 
-      default:
-        break;
+      default: {
+        return res
+          .status(200)
+          .json({ success: true, message: "Event ignored" });
+      }
     }
   } catch (error) {
-    res.json({ success: false, message: error.message });
+    console.error("Clerk webhook error:", error?.message || error);
+    return res
+      .status(400)
+      .json({ success: false, message: error?.message || "Invalid webhook" });
   }
 };
