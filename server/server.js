@@ -4,19 +4,22 @@ import "dotenv/config";
 import connectDB from "./configs/mongodb.js";
 import { clerkWebhooks } from "./controller/webhooks.js";
 
+//Initialize Express
 const app = express();
 
-// Kết nối DB
+//Connect to database
 await connectDB();
 
-// Middlewares
+//Middlewares
 app.use(cors());
 
-// Routes
+//Routes
 app.get("/", (req, res) => res.send("API Working"));
+app.post("/clerk", express.json(), clerkWebhooks);
 
-// Webhook route (dùng raw để verify chữ ký)
-app.post("/clerk", express.raw({ type: "application/json" }), clerkWebhooks);
-
+//Port
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
