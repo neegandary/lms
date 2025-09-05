@@ -18,9 +18,4 @@ app.get("/", (req, res) => res.send("API Working"));
 // Use raw body for Clerk webhook so signature verification works
 app.post("/clerk", express.raw({ type: "application/json" }), clerkWebhooks);
 
-//Port
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+export default app;
