@@ -31,10 +31,13 @@ const connectDB = async () => {
     }
 
     console.log("Attempting to connect to MongoDB...");
-    await mongoose.connect(`${process.env.MONGODB_URI}/lms`, {
+    // Don't append /lms - the MongoDB URI should already include the database name
+    // or MongoDB will use the default database specified in the connection string
+    await mongoose.connect(process.env.MONGODB_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
+      dbName: "LMS", // Explicitly specify the database name
     });
 
     isConnected = true;
