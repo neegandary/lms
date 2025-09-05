@@ -7,9 +7,6 @@ import { clerkWebhooks } from "./controller/webhooks.js";
 //Initialize Express
 const app = express();
 
-//Connect to database
-await connectDB();
-
 //Middlewares
 app.use(cors());
 
@@ -17,9 +14,25 @@ app.use(cors());
 app.get("/", (req, res) => res.send("API Working"));
 app.post("/clerk", express.json(), clerkWebhooks);
 
-//Port
-const PORT = process.env.PORT || 5000;
+//Connect to database and start server
+const startServer = async () => {
+  try {
+    await connectDB();
+    console.log("Database connected successfully");
+  } catch (error) {
+    console.error("Database connection failed:", error.message);
+  }
+};
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// For Vercel, we don't need to listen on a port
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
+
+// Initialize database connection
+startServer();
+
+export default app;
