@@ -30,7 +30,43 @@ app.get("/test-db", async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
-app.post("/clerk", express.json(), clerkWebhooks);
+app.get("/test-user", async (req, res) => {
+  try {
+    const { default: User } = await import("./models/User.js");
+
+    // Try to create a test user
+    const testUser = {
+      _id: "test-" + Date.now(),
+      name: "Test User",
+      email: "test@example.com",
+      imageUrl: "",
+    };
+
+    console.log("🧪 Testing user creation with:", testUser);
+
+    const createdUser = await User.create(testUser);
+    console.log("✅ Test user created successfully:", createdUser);
+
+    // Clean up test user
+    await User.findByIdAndDelete(testUser._id);
+    console.log("🧹 Test user cleaned up");
+
+    res.json({
+      success: true,
+      message: "User creation test passed",
+      testUser: createdUser,
+    });
+  } catch (error) {
+    console.error("❌ User creation test failed:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      error: error.name,
+    });
+  }
+});
+// Special middleware for Clerk webhooks - capture raw body
+app.post("/clerk", express.raw({ type: "application/json" }), clerkWebhooks);
 
 //Connect to database and start server
 const startServer = async () => {
