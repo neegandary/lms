@@ -6,23 +6,19 @@ let isConnected = false;
 
 const connectDB = async () => {
   if (isConnected) {
-    console.log("Using existing database connection");
     return;
   }
 
   try {
     mongoose.connection.on("connected", () => {
-      console.log("Database Connected");
       isConnected = true;
     });
 
     mongoose.connection.on("error", (err) => {
-      console.log("Database Error:", err);
       isConnected = false;
     });
 
     mongoose.connection.on("disconnected", () => {
-      console.log("Database Disconnected");
       isConnected = false;
     });
 
@@ -30,20 +26,15 @@ const connectDB = async () => {
       throw new Error("MONGODB_URI environment variable is not defined");
     }
 
-    console.log("Attempting to connect to MongoDB...");
-    // Don't append /lms - the MongoDB URI should already include the database name
-    // or MongoDB will use the default database specified in the connection string
     await mongoose.connect(process.env.MONGODB_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
-      dbName: "LMS", // Explicitly specify the database name
+      dbName: "lms",
     });
 
     isConnected = true;
-    console.log("MongoDB connection established");
   } catch (error) {
-    console.error("Database connection error:", error.message);
     isConnected = false;
     throw error;
   }
