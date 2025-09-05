@@ -12,6 +12,24 @@ app.use(cors());
 
 //Routes
 app.get("/", (req, res) => res.send("API Working"));
+app.get("/test-db", async (req, res) => {
+  try {
+    const mongoose = await import("mongoose");
+    const dbState = mongoose.default.connection.readyState;
+    const states = ["disconnected", "connected", "connecting", "disconnecting"];
+
+    res.json({
+      success: true,
+      database: {
+        state: states[dbState],
+        name: mongoose.default.connection.name,
+        host: mongoose.default.connection.host,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 app.post("/clerk", express.json(), clerkWebhooks);
 
 //Connect to database and start server
