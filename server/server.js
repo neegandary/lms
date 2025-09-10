@@ -28,25 +28,36 @@ app.use("/api/course", express.json(), courseRouter);
 
 app.use("/api/user", express.json(), userRouter);
 
-app.post("/stripe", express.raw({ type: "application/json" }), stripeWebhooks);
+app.post(
+  "/webhook/stripe",
+  express.raw({ type: "application/json" }),
+  stripeWebhooks
+);
 
 //Connect to database and start server
 const startServer = async () => {
   try {
     await connectDB();
+    console.log("MongoDB connected successfully");
+
+    await connectCloudinary();
+    console.log("Cloudinary connected successfully");
+
+    // For Vercel, we don't need to listen on a port
+    if (process.env.NODE_ENV !== "production") {
+      const PORT = process.env.PORT || 5000;
+      app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+      });
+    }
   } catch (error) {
-    // Database connection failed, but continue running
+    console.error("Failed to start server:", error.message);
+    // Give some time for logging before exiting
+    setTimeout(() => process.exit(1), 1000);
   }
 };
-await connectCloudinary();
 
-// For Vercel, we don't need to listen on a port
-if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT);
-}
-
-// Initialize database connection
+// Initialize server
 startServer();
 
 export default app;

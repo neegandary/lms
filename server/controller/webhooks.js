@@ -126,6 +126,7 @@ export const clerkWebhooks = async (req, res) => {
 const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export const stripeWebhooks = async (request, response) => {
+  console.log("Stripe webhook received");
   const sig = request.headers["stripe-signature"];
 
   let event;
@@ -136,12 +137,21 @@ export const stripeWebhooks = async (request, response) => {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
+    console.log(
+      "Stripe webhook verified successfully, event type:",
+      event.type
+    );
   } catch (err) {
+    console.error("Stripe webhook verification failed:", err.message);
     return response.status(400).send(`Webhook Error: ${err.message}`);
   }
   // Handle the event
   const handlePaymentSuccess = async (paymentIntent) => {
     try {
+      console.log(
+        "Processing successful payment for intent:",
+        paymentIntent.id
+      );
       const paymentIntentId = paymentIntent.id;
       const session = await stripeInstance.checkout.sessions.list({
         payment_intent: paymentIntentId,
@@ -155,13 +165,28 @@ export const stripeWebhooks = async (request, response) => {
         return;
       }
 
+      console.log("Session data found:", session.data[0].id);
       const { purchaseId } = session.data[0].metadata;
+      console.log("Purchase ID from metadata:", purchaseId);
+
+      if (!purchaseId) {
+        console.error("No purchaseId found in session metadata");
+        return;
+      }
+
       const purchaseData = await Purchase.findById(purchaseId);
 
       if (!purchaseData) {
         console.error("No purchase found for ID:", purchaseId);
         return;
       }
+
+      console.log(
+        "Purchase found:",
+        purchaseData._id,
+        "with status:",
+        purchaseData.status
+      );
 
       const userData = await User.findById(purchaseData.userId);
       const courseData = await Course.findById(
@@ -173,17 +198,22 @@ export const stripeWebhooks = async (request, response) => {
         return;
       }
 
+      console.log("Found user:", userData._id, "and course:", courseData._id);
+
       // Add user to enrolled students
       courseData.enrolledStudents.push(userData._id);
       await courseData.save();
+      console.log("Added user to enrolled students");
 
       // Add course to user's enrolled courses
       userData.enrolledCourses.push(courseData._id);
       await userData.save();
+      console.log("Added course to user's enrolled courses");
 
       // Update purchase status
       purchaseData.status = "completed";
       await purchaseData.save();
+      console.log("Updated purchase status to completed");
     } catch (error) {
       console.error("Error handling payment success:", error);
     }
