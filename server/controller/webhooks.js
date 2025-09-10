@@ -126,6 +126,7 @@ export const clerkWebhooks = async (req, res) => {
 const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export const stripeWebhooks = async (request, response) => {
+  console.log("Stripe webhook received");
   const sig = request.headers["stripe-signature"];
 
   let event;
@@ -136,7 +137,9 @@ export const stripeWebhooks = async (request, response) => {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
+    console.log(`Stripe event received: ${event.type}`);
   } catch (err) {
+    console.error(`Webhook signature verification failed: ${err.message}`);
     return response.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -145,19 +148,41 @@ export const stripeWebhooks = async (request, response) => {
     case "payment_intent.succeeded":
       const paymentIntent = event.data.object;
       const paymentIntentId = paymentIntent.id;
+      console.log(`Payment succeeded for intent: ${paymentIntentId}`);
 
       const session = await stripeInstance.checkout.sessions.list({
         payment_intent: paymentIntentId,
       });
 
+      if (!session.data || session.data.length === 0) {
+        console.error("No session found for payment intent:", paymentIntentId);
+        break;
+      }
+
       const { purchaseId } = session.data[0].metadata;
+      console.log(`Processing purchase: ${purchaseId}`);
 
       const purchaseData = await Purchase.findById(purchaseId);
+      if (!purchaseData) {
+        console.error(`Purchase not found with ID: ${purchaseId}`);
+        break;
+      }
+
       const userData = await User.findById(purchaseData.userId);
+      if (!userData) {
+        console.error(`User not found with ID: ${purchaseData.userId}`);
+        break;
+      }
+
       const courseData = await Course.findById(
         purchaseData.courseId.toString()
       );
+      if (!courseData) {
+        console.error(`Course not found with ID: ${purchaseData.courseId}`);
+        break;
+      }
 
+      console.log(`Enrolling user ${userData._id} in course ${courseData._id}`);
       courseData.enrolledStudents.push(userData);
       await courseData.save();
 
@@ -166,20 +191,38 @@ export const stripeWebhooks = async (request, response) => {
 
       purchaseData.status = "completed";
       await purchaseData.save();
+      console.log(`Purchase ${purchaseId} marked as completed`);
 
       break;
     case "payment_intent.payment_failed":
-      paymentIntent = event.data.object;
-      paymentIntentId = paymentIntent.id;
+      const failedPaymentIntent = event.data.object;
+      const failedPaymentIntentId = failedPaymentIntent.id;
+      console.log(`Payment failed for intent: ${failedPaymentIntentId}`);
 
-      session = await stripeInstance.checkout.sessions.list({
-        payment_intent: paymentIntentId,
+      const failedSession = await stripeInstance.checkout.sessions.list({
+        payment_intent: failedPaymentIntentId,
       });
 
-      purchaseId = session.data[0].metadata;
-      purchaseData = await Purchase.findById(purchaseId);
-      purchaseData.status = "failed";
-      await purchaseData.save();
+      if (!failedSession.data || failedSession.data.length === 0) {
+        console.error(
+          "No session found for failed payment intent:",
+          failedPaymentIntentId
+        );
+        break;
+      }
+
+      const { purchaseId: failedPurchaseId } = failedSession.data[0].metadata;
+      console.log(`Processing failed purchase: ${failedPurchaseId}`);
+
+      const failedPurchaseData = await Purchase.findById(failedPurchaseId);
+      if (!failedPurchaseData) {
+        console.error(`Failed purchase not found with ID: ${failedPurchaseId}`);
+        break;
+      }
+
+      failedPurchaseData.status = "failed";
+      await failedPurchaseData.save();
+      console.log(`Purchase ${failedPurchaseId} marked as failed`);
       break;
     //..handle other event types
     default:
@@ -188,5 +231,6 @@ export const stripeWebhooks = async (request, response) => {
   }
 
   //Return a response to acknowledge receipt of the event
+  console.log("Stripe webhook processed successfully");
   response.json({ received: true });
 };
