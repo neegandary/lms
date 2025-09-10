@@ -126,7 +126,6 @@ export const clerkWebhooks = async (req, res) => {
 const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export const stripeWebhooks = async (request, response) => {
-  console.log("Stripe webhook received");
   const sig = request.headers["stripe-signature"];
 
   let event;
@@ -137,131 +136,57 @@ export const stripeWebhooks = async (request, response) => {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
-    console.log(
-      "Stripe webhook verified successfully, event type:",
-      event.type
-    );
   } catch (err) {
-    console.error("Stripe webhook verification failed:", err.message);
     return response.status(400).send(`Webhook Error: ${err.message}`);
   }
-  // Handle the event
-  const handlePaymentSuccess = async (paymentIntent) => {
-    try {
-      console.log(
-        "Processing successful payment for intent:",
-        paymentIntent.id
-      );
+
+  //Handle the event
+  switch (event.type) {
+    case "payment_intent.succeeded":
+      const paymentIntent = event.data.object;
       const paymentIntentId = paymentIntent.id;
+
       const session = await stripeInstance.checkout.sessions.list({
         payment_intent: paymentIntentId,
       });
 
-      if (!session.data.length) {
-        console.error(
-          "No session data found for payment intent:",
-          paymentIntentId
-        );
-        return;
-      }
-
-      console.log("Session data found:", session.data[0].id);
       const { purchaseId } = session.data[0].metadata;
-      console.log("Purchase ID from metadata:", purchaseId);
-
-      if (!purchaseId) {
-        console.error("No purchaseId found in session metadata");
-        return;
-      }
 
       const purchaseData = await Purchase.findById(purchaseId);
-
-      if (!purchaseData) {
-        console.error("No purchase found for ID:", purchaseId);
-        return;
-      }
-
-      console.log(
-        "Purchase found:",
-        purchaseData._id,
-        "with status:",
-        purchaseData.status
-      );
-
       const userData = await User.findById(purchaseData.userId);
       const courseData = await Course.findById(
         purchaseData.courseId.toString()
       );
 
-      if (!userData || !courseData) {
-        console.error("User or Course not found");
-        return;
-      }
-
-      console.log("Found user:", userData._id, "and course:", courseData._id);
-
-      // Add user to enrolled students
-      courseData.enrolledStudents.push(userData._id);
+      courseData.enrolledStudents.push(userData);
       await courseData.save();
-      console.log("Added user to enrolled students");
 
-      // Add course to user's enrolled courses
       userData.enrolledCourses.push(courseData._id);
       await userData.save();
-      console.log("Added course to user's enrolled courses");
 
-      // Update purchase status
       purchaseData.status = "completed";
       await purchaseData.save();
-      console.log("Updated purchase status to completed");
-    } catch (error) {
-      console.error("Error handling payment success:", error);
-    }
-  };
 
-  const handlePaymentFailed = async (paymentIntent) => {
-    try {
-      const paymentIntentId = paymentIntent.id;
-      const session = await stripeInstance.checkout.sessions.list({
+      break;
+    case "payment_intent.payment_failed":
+      paymentIntent = event.data.object;
+      paymentIntentId = paymentIntent.id;
+
+      session = await stripeInstance.checkout.sessions.list({
         payment_intent: paymentIntentId,
       });
 
-      if (!session.data.length) {
-        console.error(
-          "No session data found for failed payment intent:",
-          paymentIntentId
-        );
-        return;
-      }
-
-      const { purchaseId } = session.data[0].metadata;
-      const purchaseData = await Purchase.findById(purchaseId);
-
-      if (!purchaseData) {
-        console.error("No purchase found for ID:", purchaseId);
-        return;
-      }
-
+      purchaseId = session.data[0].metadata;
+      purchaseData = await Purchase.findById(purchaseId);
       purchaseData.status = "failed";
       await purchaseData.save();
-    } catch (error) {
-      console.error("Error handling payment failure:", error);
-    }
-  };
-
-  switch (event.type) {
-    case "payment_intent.succeeded":
-      await handlePaymentSuccess(event.data.object);
       break;
-
-    case "payment_intent.payment_failed":
-      await handlePaymentFailed(event.data.object);
-      break;
-
+    //..handle other event types
     default:
       console.log(`Unhandled event type ${event.type}`);
+      break;
   }
 
-  // Return a response to acknowledge receipt of the event
+  //Return a response to acknowledge receipt of the event
   response.json({ received: true });
 };
