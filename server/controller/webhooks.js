@@ -132,102 +132,151 @@ export const stripeWebhooks = async (request, response) => {
   let event;
 
   try {
+    // Verify the webhook signature
     event = stripeInstance.webhooks.constructEvent(
       request.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
     console.log(`Stripe event received: ${event.type}`);
+
+    // Check database connection before processing
+    if (mongoose.connection.readyState !== 1) {
+      console.log(
+        "MongoDB connection not established. Attempting to connect..."
+      );
+      try {
+        await connectDB();
+        console.log("MongoDB connection established successfully");
+      } catch (dbError) {
+        console.error(`Database connection failed: ${dbError.message}`);
+        // We'll still process the webhook, but log the error
+      }
+    }
   } catch (err) {
     console.error(`Webhook signature verification failed: ${err.message}`);
     return response.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   //Handle the event
-  switch (event.type) {
-    case "payment_intent.succeeded":
-      const paymentIntent = event.data.object;
-      const paymentIntentId = paymentIntent.id;
-      console.log(`Payment succeeded for intent: ${paymentIntentId}`);
+  try {
+    switch (event.type) {
+      case "payment_intent.succeeded":
+        const paymentIntent = event.data.object;
+        const paymentIntentId = paymentIntent.id;
+        console.log(`Payment succeeded for intent: ${paymentIntentId}`);
 
-      const session = await stripeInstance.checkout.sessions.list({
-        payment_intent: paymentIntentId,
-      });
+        const session = await stripeInstance.checkout.sessions.list({
+          payment_intent: paymentIntentId,
+        });
 
-      if (!session.data || session.data.length === 0) {
-        console.error("No session found for payment intent:", paymentIntentId);
-        break;
-      }
+        if (!session.data || session.data.length === 0) {
+          console.error(
+            "No session found for payment intent:",
+            paymentIntentId
+          );
+          break;
+        }
 
-      const { purchaseId } = session.data[0].metadata;
-      console.log(`Processing purchase: ${purchaseId}`);
+        const { purchaseId } = session.data[0].metadata;
+        console.log(`Processing purchase: ${purchaseId}`);
 
-      const purchaseData = await Purchase.findById(purchaseId);
-      if (!purchaseData) {
-        console.error(`Purchase not found with ID: ${purchaseId}`);
-        break;
-      }
+        const purchaseData = await Purchase.findById(purchaseId);
+        if (!purchaseData) {
+          console.error(`Purchase not found with ID: ${purchaseId}`);
+          break;
+        }
 
-      const userData = await User.findById(purchaseData.userId);
-      if (!userData) {
-        console.error(`User not found with ID: ${purchaseData.userId}`);
-        break;
-      }
+        console.log(`Found purchase data:`, {
+          id: purchaseData._id,
+          status: purchaseData.status,
+          userId: purchaseData.userId,
+          courseId: purchaseData.courseId,
+        });
 
-      const courseData = await Course.findById(
-        purchaseData.courseId.toString()
-      );
-      if (!courseData) {
-        console.error(`Course not found with ID: ${purchaseData.courseId}`);
-        break;
-      }
+        const userData = await User.findById(purchaseData.userId);
+        if (!userData) {
+          console.error(`User not found with ID: ${purchaseData.userId}`);
+          break;
+        }
 
-      console.log(`Enrolling user ${userData._id} in course ${courseData._id}`);
-      courseData.enrolledStudents.push(userData._id);
-      await courseData.save();
-
-      userData.enrolledCourses.push(courseData._id);
-      await userData.save();
-
-      purchaseData.status = "completed";
-      await purchaseData.save();
-      console.log(`Purchase ${purchaseId} marked as completed`);
-
-      break;
-    case "payment_intent.payment_failed":
-      const failedPaymentIntent = event.data.object;
-      const failedPaymentIntentId = failedPaymentIntent.id;
-      console.log(`Payment failed for intent: ${failedPaymentIntentId}`);
-
-      const failedSession = await stripeInstance.checkout.sessions.list({
-        payment_intent: failedPaymentIntentId,
-      });
-
-      if (!failedSession.data || failedSession.data.length === 0) {
-        console.error(
-          "No session found for failed payment intent:",
-          failedPaymentIntentId
+        console.log(
+          `Enrolling user ${userData._id} in course ${purchaseData.courseId}`
         );
+
+        // Use updateOne directly with courseId to avoid validation issues
+        const courseUpdateResult = await Course.updateOne(
+          { _id: purchaseData.courseId },
+          { $addToSet: { enrolledStudents: userData._id } }
+        );
+        console.log(`Course update result:`, courseUpdateResult);
+
+        // Verify course exists by checking if update was successful
+        if (courseUpdateResult.matchedCount === 0) {
+          console.error(`Course not found with ID: ${purchaseData.courseId}`);
+          break;
+        }
+
+        // Use updateOne to avoid validation issues
+        const userUpdateResult = await User.updateOne(
+          { _id: userData._id },
+          { $addToSet: { enrolledCourses: purchaseData.courseId } }
+        );
+        console.log(`User update result:`, userUpdateResult);
+
+        // Update purchase status directly to avoid validation issues
+        const updateResult = await Purchase.updateOne(
+          { _id: purchaseId },
+          { $set: { status: "completed" } }
+        );
+        console.log(`Purchase update result:`, updateResult);
+        console.log(`Purchase ${purchaseId} marked as completed`);
+
         break;
-      }
+      case "payment_intent.payment_failed":
+        const failedPaymentIntent = event.data.object;
+        const failedPaymentIntentId = failedPaymentIntent.id;
+        console.log(`Payment failed for intent: ${failedPaymentIntentId}`);
 
-      const { purchaseId: failedPurchaseId } = failedSession.data[0].metadata;
-      console.log(`Processing failed purchase: ${failedPurchaseId}`);
+        const failedSession = await stripeInstance.checkout.sessions.list({
+          payment_intent: failedPaymentIntentId,
+        });
 
-      const failedPurchaseData = await Purchase.findById(failedPurchaseId);
-      if (!failedPurchaseData) {
-        console.error(`Failed purchase not found with ID: ${failedPurchaseId}`);
+        if (!failedSession.data || failedSession.data.length === 0) {
+          console.error(
+            "No session found for failed payment intent:",
+            failedPaymentIntentId
+          );
+          break;
+        }
+
+        const { purchaseId: failedPurchaseId } = failedSession.data[0].metadata;
+        console.log(`Processing failed purchase: ${failedPurchaseId}`);
+
+        const failedPurchaseData = await Purchase.findById(failedPurchaseId);
+        if (!failedPurchaseData) {
+          console.error(
+            `Failed purchase not found with ID: ${failedPurchaseId}`
+          );
+          break;
+        }
+
+        // Update purchase status directly to avoid validation issues
+        await Purchase.updateOne(
+          { _id: failedPurchaseId },
+          { $set: { status: "failed" } }
+        );
+        console.log(`Purchase ${failedPurchaseId} marked as failed`);
         break;
-      }
-
-      failedPurchaseData.status = "failed";
-      await failedPurchaseData.save();
-      console.log(`Purchase ${failedPurchaseId} marked as failed`);
-      break;
-    //..handle other event types
-    default:
-      console.log(`Unhandled event type ${event.type}`);
-      break;
+      //..handle other event types
+      default:
+        console.log(`Unhandled event type ${event.type}`);
+        break;
+    }
+  } catch (webhookError) {
+    console.error(`Error processing webhook:`, webhookError);
+    // Still return success to prevent Stripe from retrying
+    return response.json({ received: true, error: webhookError.message });
   }
 
   //Return a response to acknowledge receipt of the event

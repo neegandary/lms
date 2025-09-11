@@ -44,15 +44,31 @@ export const purchaseCourse = async (req, res) => {
       return res.json({ success: false, message: "User or Course not found" });
     }
 
-    const purchaseData = {
-      courseId: courseData._id,
+    // Check if user already has a pending purchase for this course
+    let existingPurchase = await Purchase.findOne({
       userId,
-      amount: (
-        courseData.coursePrice -
-        (courseData.discount * courseData.coursePrice) / 100
-      ).toFixed(2),
-    };
-    const newPurchase = await Purchase.create(purchaseData);
+      courseId: courseData._id,
+      status: "pending",
+    });
+
+    let newPurchase;
+    if (existingPurchase) {
+      // Use existing pending purchase
+      newPurchase = existingPurchase;
+      console.log(`Using existing pending purchase: ${newPurchase._id}`);
+    } else {
+      // Create new purchase only if no pending purchase exists
+      const purchaseData = {
+        courseId: courseData._id,
+        userId,
+        amount: (
+          courseData.coursePrice -
+          (courseData.discount * courseData.coursePrice) / 100
+        ).toFixed(2),
+      };
+      newPurchase = await Purchase.create(purchaseData);
+      console.log(`Created new purchase: ${newPurchase._id}`);
+    }
 
     //Stripe Gateway Initialize
     const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -74,7 +90,7 @@ export const purchaseCourse = async (req, res) => {
     ];
 
     const session = await stripeInstance.checkout.sessions.create({
-      success_url: `${origin}loading/my-enrollments`,
+      success_url: `${origin}/loading/my-enrollments`,
       cancel_url: `${origin}/`,
       line_items: line_items,
       mode: "payment",
